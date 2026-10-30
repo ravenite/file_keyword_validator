@@ -94,8 +94,12 @@ keyword matching, with these limits:
 
 * **Keyword Management**:
   * Textarea with one keyword or phrase per line.
-  * Matching is always case-insensitive substring matching, so `restricted` also
-    matches `unrestricted`.
+  * Matching is always case-insensitive and whole-word. `confidential` matches
+    `CONFIDENTIAL` but not `confidentiality`, and `restricted` does not match
+    `unrestricted`.
+  * A hyphen separates words, so `highly-confidential` matches, except after
+    `non` or `un`, so `non-confidential` does not. `non confidential` with a
+    space still matches.
   * Regular expression support: **Not implemented.**
 * **Threshold Settings**:
   * **File Size Threshold**: Default `10MB` (stored in bytes as
@@ -268,7 +272,7 @@ written to the `file_keyword_validator` log channel, and the save carries on.
 
 | Area | Requirement | Current behavior |
 |---|---|---|
-| 4.1 | Regular expression keywords | Plain case-insensitive substring matching only. |
+| 4.1 | Regular expression keywords | Plain case-insensitive whole-word matching only. |
 | 4.1 | Memory limit cap | No setting exists. |
 | 6.2 | `FileKeywordScanEvent` | No event class exists. The worker writes the log directly. |
 | 8 | PDF page chunking and memory exit | PDFs are parsed whole. |

@@ -33,10 +33,25 @@ rebuilt.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| Flagged keywords | restricted, confidential, non-public | One per line. Matching is case-insensitive substring matching. |
+| Flagged keywords | restricted, confidential, non-public | One per line. Matching is case-insensitive and whole-word. See [Keyword matching](#keyword-matching). |
 | Max file size for sync scanning | 10 MB | Larger files are scanned in the background. |
 | Max page count for sync scanning | 500 | PDFs with more pages are scanned in the background. |
 | `enabled_extensions` (config only) | pdf, docx, doc, xlsx, xls, pptx, ppt | Files with other extensions are ignored. |
+
+## Keyword matching
+
+Keywords match in any case, as whole words only:
+
+| Text in the file | `confidential` matches? |
+|---|---|
+| confidential, CONFIDENTIAL, ConFidential | Yes |
+| highly-confidential, confidential-draft, confidential_report | Yes |
+| confidentiality, nonconfidential | No, it's part of a longer word |
+| non-confidential, un-confidential | No, the prefix reverses the meaning |
+| non confidential | Yes, because only the hyphenated form is excluded |
+
+A keyword has to appear exactly as written, so list `non public` and `nonpublic`
+separately from `non-public` if they matter.
 
 ## How it works
 

@@ -35,7 +35,7 @@ class AdminSettingsForm extends ConfigFormBase {
     $form['flagged_keywords'] = [
       '#type' => 'textarea',
       '#title' => $this->t('Flagged Keywords'),
-      '#description' => $this->t('Enter one keyword or phrase per line. Scanning is case-insensitive.'),
+      '#description' => $this->t('Enter one keyword or phrase per line. Scanning is case-insensitive and matches whole words only.'),
       '#default_value' => implode("\n", $keywords),
       '#rows' => 10,
     ];

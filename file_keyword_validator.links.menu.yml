@@ -1,6 +1,5 @@
 file_keyword_validator.admin_settings:
   title: 'File Keyword Validator Settings'
-  parent: system.admin_config_media
   description: 'Configure flagged keywords and execution limits for document scanning.'
   route_name: file_keyword_validator.admin_settings
-  weight: 100
+  parent: system.admin_config_media

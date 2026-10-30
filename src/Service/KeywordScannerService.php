@@ -141,11 +141,12 @@ class KeywordScannerService {
       return $cache->data;
     }
 
-    $text = $this->extractor->extractText($file);
+    // Invalid UTF-8 makes preg_match() fail, which would look like no match.
+    $text = mb_scrub($this->extractor->extractText($file), 'UTF-8');
     $matched_keywords = [];
 
     foreach ($keywords as $kw) {
-      if (mb_stripos($text, $kw) !== FALSE) {
+      if (preg_match($this->getKeywordPattern($kw), $text)) {
         $matched_keywords[] = $kw;
       }
     }
@@ -154,6 +155,20 @@ class KeywordScannerService {
     $this->cache->set($cid, $matched_keywords, CacheBackendInterface::CACHE_PERMANENT);
 
     return $matched_keywords;
+  }
+
+  /**
+   * Build the case-insensitive, whole-word pattern for a keyword.
+   *
+   * A hyphen separates words, so "highly-confidential" matches, unless it
+   * follows "non" or "un", which reverse the keyword's meaning. Both hyphens
+   * Word can insert are covered as well as the plain one.
+   */
+  protected function getKeywordPattern(string $keyword): string {
+    $hyphen = '[-\x{2010}\x{2011}]';
+    return '/(?<![\p{L}\p{N}])(?<!\bnon' . $hyphen . ')(?<!\bun' . $hyphen . ')'
+      . preg_quote($keyword, '/')
+      . '(?![\p{L}\p{N}])/iu';
   }
 
   /**
