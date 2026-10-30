@@ -1,0 +1,55 @@
+<?php
+
+/**
+ * @file
+ * Install and requirements hooks for file_keyword_validator module.
+ */
+
+use Drupal\Core\Extension\Requirement\RequirementSeverity;
+use Smalot\PdfParser\Parser as PdfParser;
+
+/**
+ * Implements hook_requirements().
+ *
+ * Extraction errors are caught so they never block a save, and the empty result
+ * is cached as "no matches". Without this check, a missing dependency would
+ * look like a clean scan. Database updates are not held back by it.
+ */
+function file_keyword_validator_requirements(string $phase): array {
+  if ($phase === 'update') {
+    return [];
+  }
+
+  $missing = [];
+  if (!class_exists(PdfParser::class)) {
+    $missing[] = 'smalot/pdfparser';
+  }
+  foreach (['zip', 'xmlreader'] as $extension) {
+    if (!extension_loaded($extension)) {
+      $missing[] = 'PHP ' . $extension . ' extension';
+    }
+  }
+
+  if ($missing) {
+    return [
+      'file_keyword_validator_dependencies' => [
+        'title' => t('File Keyword Validator dependencies'),
+        'value' => t('Missing: @missing', ['@missing' => implode(', ', $missing)]),
+        'description' => t('Files that need a missing dependency are not scanned. See the module README. Files scanned before this is fixed keep their cached result until caches are rebuilt.'),
+        'severity' => RequirementSeverity::Error,
+      ],
+    ];
+  }
+
+  if ($phase === 'runtime') {
+    return [
+      'file_keyword_validator_dependencies' => [
+        'title' => t('File Keyword Validator dependencies'),
+        'value' => t('Available'),
+        'severity' => RequirementSeverity::OK,
+      ],
+    ];
+  }
+
+  return [];
+}

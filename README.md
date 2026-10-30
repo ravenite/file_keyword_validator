@@ -13,8 +13,17 @@ carries on.
 
 - PHP 8.4 or later.
 - Drupal 11 with `file`, `media`, `workflows` and `content_moderation`.
-- `smalot/pdfparser` for PDF (already in the project's root `composer.json`).
+- `smalot/pdfparser` for PDF.
 - PHP's `zip` and `xmlreader` extensions for Office files.
+
+The module's own `composer.json` declares all of these, so installing it through
+Composer brings them in. Drupal doesn't read that file, so if the module folder
+is copied into a site instead, run `composer require smalot/pdfparser` there.
+
+If any of these is missing, Drupal won't install the module. On a site where it
+is already installed, **Reports → Status report** shows an error. Files scanned
+while a dependency was missing keep their cached result until caches are
+rebuilt.
 
 ## Configuration
 
@@ -167,12 +176,14 @@ those keywords.
 | Path | Purpose |
 |---|---|
 | `file_keyword_validator.module` | Media presave, insert and update hooks that decide what to scan and how. |
+| `file_keyword_validator.install` | Checks that the dependencies are available. |
 | `file_keyword_validator.services.yml` | Registers the scanner and text extractor services. |
 | `src/Service/KeywordScannerService.php` | Matching, caching, sync/async decision, log formatting, async log write. |
 | `src/Service/TextExtractorService.php` | Pulls plain text out of each file format. |
 | `src/Plugin/QueueWorker/FileScannerQueueWorker.php` | Background worker for large files. |
 | `src/Form/AdminSettingsForm.php` | Settings form. |
 | `config/install/file_keyword_validator.settings.yml` | Default settings. |
+| `config/schema/file_keyword_validator.schema.yml` | Types of the settings. |
 
 ## Troubleshooting
 

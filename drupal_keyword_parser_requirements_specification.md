@@ -17,10 +17,15 @@ within Media entity revisions.
 
 ## 2. Platform & Compatibility Requirements
 
-* **PHP Version**: `>=8.4`
+* **PHP Version**: `>=8.4`, with the `zip` and `xmlreader` extensions
 * **Drupal Version**: `^11.0`
 * **Machine Name**: `file_keyword_validator`
 * **Module Dependencies**: `file`, `media`, `workflows`, `content_moderation`
+* **Dependency Check**: `hook_requirements()` reports a missing
+  `smalot/pdfparser`, `zip` or `xmlreader` as an error, which stops the module
+  from installing and shows on the status report. Extraction errors are caught
+  and cached as "no matches", so a missing dependency would otherwise look like
+  a clean scan. The check does not hold back database updates.
 * **Enforcement Policy**: **Non-blocking**. Identified keywords will not
   interrupt file uploads, reject entity validation, or prevent content
   moderation state transitions. All findings are logged directly into Media
@@ -102,6 +107,8 @@ keyword matching, with these limits:
 * **Configuration Only**:
   * `enabled_extensions`: The file extensions to scan. It has no field on the
     form.
+* **Configuration Schema**: All settings are typed in
+  `config/schema/file_keyword_validator.schema.yml`.
 * **Default Keywords**: `restricted`, `confidential`, `non-public`.
 * **Permissions**:
   * Administer file keyword validator settings

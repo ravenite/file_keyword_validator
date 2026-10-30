@@ -1,0 +1,22 @@
+file_keyword_validator.settings:
+  type: config_object
+  label: 'File Keyword Validator settings'
+  mapping:
+    flagged_keywords:
+      type: sequence
+      label: 'Flagged keywords'
+      sequence:
+        type: string
+        label: 'Keyword'
+    async_threshold_size:
+      type: integer
+      label: 'Max file size for sync scanning, in bytes'
+    async_threshold_pages:
+      type: integer
+      label: 'Max page count for sync scanning'
+    enabled_extensions:
+      type: sequence
+      label: 'File extensions to scan'
+      sequence:
+        type: string
+        label: 'Extension'

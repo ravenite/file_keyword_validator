@@ -5,6 +5,8 @@
   "license": "GPL-2.0-or-later",
   "require": {
     "php": ">=8.4",
+    "ext-xmlreader": "*",
+    "ext-zip": "*",
     "drupal/core": "^11",
     "smalot/pdfparser": "^2.7"
   }
