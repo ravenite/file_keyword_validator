@@ -70,12 +70,13 @@ never saved as Media is not scanned.
 - **Sync**: the file is at or under both limits. It is scanned during the
   request, and the audit entry is added to the revision being saved, after any
   log message the editor wrote.
-- **Async**: the file is over the size limit or (for PDFs) the page limit, or
-  it is a PDF whose page count can't be read from the file. The count is read
+- **Async**: the file is over the size limit or (for PDFs) the page limit, or it
+  is a PDF whose page count can't be read from the file. The count is read
   directly rather than by parsing the PDF, which keeps this check cheap, but
-  PDFs with compressed object streams may not expose it. It is queued after the Media item is saved, and the worker later adds the
-  audit entry to that same revision, after any log message the editor wrote.
-  Until the queue runs, the revision has no audit entry for that file.
+  PDFs with compressed object streams may not expose it. It is queued after the
+  Media item is saved, and the worker later adds the audit entry to that same
+  revision, after any log message the editor wrote. Until the queue runs, the
+  revision has no audit entry for that file.
 
 ### Caching
 
@@ -90,8 +91,11 @@ never reads or evaluates the same file twice.
 
 ## The audit log message
 
+Each entry is a single line. The ones below are wrapped to fit this page.
+
 ```
-[AUDIT] Flagged keywords detected in file "<filename>": <kw1>, <kw2> [<mode> | <state>]
+[AUDIT] Flagged keywords detected in file "<filename>": <kw1>, <kw2>
+  [<mode> | <state>]
 ```
 
 - `<mode>`: `sync` or `async`.
@@ -104,9 +108,12 @@ never reads or evaluates the same file twice.
 Examples:
 
 ```
-[AUDIT] Flagged keywords detected in file "report.docx": confidential [sync | status: unpublished]
-[AUDIT] Flagged keywords detected in file "brief.docx": restricted [sync | transition: draft → published]
-[AUDIT] Flagged keywords detected in file "big.pdf": non-public [async | state: draft]
+[AUDIT] Flagged keywords detected in file "report.docx": confidential
+  [sync | status: unpublished]
+[AUDIT] Flagged keywords detected in file "brief.docx": restricted
+  [sync | transition: draft → published]
+[AUDIT] Flagged keywords detected in file "big.pdf": non-public
+  [async | state: draft]
 ```
 
 These appear on the Media item's **Revisions** tab (`/media/{id}/revisions`).

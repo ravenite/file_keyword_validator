@@ -4,6 +4,7 @@ namespace Drupal\file_keyword_validator\Service;
 
 use Drupal\file\Entity\File;
 use Smalot\PdfParser\Parser as PdfParser;
+use Drupal\Core\File\FileSystemInterface;
 use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 
 /**
@@ -23,6 +24,7 @@ class TextExtractorService {
 
   public function __construct(
     protected LoggerChannelFactoryInterface $loggerFactory,
+    protected FileSystemInterface $fileSystem,
   ) {}
 
   /**
@@ -37,7 +39,7 @@ class TextExtractorService {
    *   PDFs that keep their page tree in a compressed object stream.
    */
   public function getPdfPageCount(File $file): ?int {
-    $real_path = \Drupal::service('file_system')->realpath($file->getFileUri());
+    $real_path = $this->fileSystem->realpath($file->getFileUri());
     $handle = $real_path && file_exists($real_path) ? fopen($real_path, 'rb') : FALSE;
     if (!$handle) {
       return NULL;
@@ -69,7 +71,7 @@ class TextExtractorService {
    * Extract plain text content from target file extensions.
    */
   public function extractText(File $file): string {
-    $real_path = \Drupal::service('file_system')->realpath($file->getFileUri());
+    $real_path = $this->fileSystem->realpath($file->getFileUri());
     if (!$real_path || !file_exists($real_path)) {
       return '';
     }

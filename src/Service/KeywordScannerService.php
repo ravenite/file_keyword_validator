@@ -9,6 +9,7 @@ use Drupal\Core\Cache\Cache;
 use Drupal\Core\Cache\CacheBackendInterface;
 use Drupal\Core\Database\Connection;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
+use Drupal\Core\File\FileSystemInterface;
 use Drupal\content_moderation\ModerationInformationInterface;
 
 /**
@@ -35,6 +36,7 @@ class KeywordScannerService {
     protected EntityTypeManagerInterface $entityTypeManager,
     protected ModerationInformationInterface $moderationInformation,
     protected Connection $database,
+    protected FileSystemInterface $fileSystem,
   ) {
     $this->deferredScans = new \WeakMap();
   }
@@ -269,7 +271,7 @@ class KeywordScannerService {
       return $this->fingerprints[$file->id()];
     }
 
-    $real_path = \Drupal::service('file_system')->realpath($file->getFileUri());
+    $real_path = $this->fileSystem->realpath($file->getFileUri());
     if (!$real_path || !file_exists($real_path)) {
       return '';
     }

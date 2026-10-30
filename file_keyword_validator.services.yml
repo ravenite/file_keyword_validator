@@ -1,7 +1,7 @@
 services:
   file_keyword_validator.text_extractor:
     class: Drupal\file_keyword_validator\Service\TextExtractorService
-    arguments: ['@logger.factory']
+    arguments: ['@logger.factory', '@file_system']
 
   file_keyword_validator.scanner:
     class: Drupal\file_keyword_validator\Service\KeywordScannerService
@@ -12,3 +12,4 @@ services:
       - '@entity_type.manager'
       - '@content_moderation.moderation_information'
       - '@database'
+      - '@file_system'
