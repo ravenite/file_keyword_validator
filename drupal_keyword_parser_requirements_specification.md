@@ -6,11 +6,11 @@ Requirements that were specified but are not built yet are kept in this document
 
 ## 1. Overview
 
-This specification details the architecture and functional requirements for a custom Drupal module (`file_keyword_validator`) designed to inspect documents attached to Media items (PDFs and Microsoft Office files) for flagged keywords. The module operates strictly as a non-blocking auditing and workflow-support tool. It targets **PHP 8.3+** and **Drupal 11+**, prioritizing low resource consumption, asynchronous queue processing for large files, and audit logging within Media entity revisions.
+This specification details the architecture and functional requirements for a custom Drupal module (`file_keyword_validator`) designed to inspect documents attached to Media items (PDFs and Microsoft Office files) for flagged keywords. The module operates strictly as a non-blocking auditing and workflow-support tool. It targets **PHP 8.4+** and **Drupal 11+**, prioritizing low resource consumption, asynchronous queue processing for large files, and audit logging within Media entity revisions.
 
 ## 2. Platform & Compatibility Requirements
 
-* **PHP Version**: `^8.3`
+* **PHP Version**: `>=8.4`
 * **Drupal Version**: `^11.0`
 * **Machine Name**: `file_keyword_validator`
 * **Module Dependencies**: `file`, `media`, `workflows`, `content_moderation`
@@ -25,20 +25,37 @@ Files are selected by **file extension**, using the `enabled_extensions` setting
 | Format | Extension | Enabled by default | Status |
 |---|---|---|---|
 | PDF | `.pdf` | Yes | Implemented. Scanned or image-only PDFs contain no text and produce no matches. |
-| MS Word | `.docx` | Yes | Partial. Only text elements directly inside sections are read. Text in tables, headers and footers is not read. |
-| MS Word (legacy) | `.doc` | Yes | Partial. Legacy files usually fail to load, which is logged and treated as no matches. |
-| MS Excel | `.xlsx`, `.xls` | Yes | Implemented. The formatted value of every cell is read. |
-| MS PowerPoint | `.pptx` | Yes | **Not implemented.** No extractor exists, so the result is always no matches. |
-| MS PowerPoint (legacy) | `.ppt` | No | **Not implemented.** |
+| MS Word | `.docx` | Yes | Implemented. Reads the body, tables, text boxes, headers, footers, footnotes, endnotes and comments. |
+| MS Word (legacy) | `.doc` | Yes | Implemented, best effort. See section 3.3. |
+| MS Excel | `.xlsx` | Yes | Implemented. Reads text, stored cell values, including formula results, and comments. |
+| MS Excel (legacy) | `.xls` | Yes | Implemented, best effort. See section 3.3. |
+| MS PowerPoint | `.pptx` | Yes | Implemented. Reads slides, including tables, and speaker notes. |
+| MS PowerPoint (legacy) | `.ppt` | Yes | Implemented, best effort. See section 3.3. |
 
 ### 3.2 Parser Dependencies
 
-To avoid abandoned software, the module relies on actively maintained, open-source PHP parsing libraries declared in `composer.json`:
+To avoid abandoned software, the module relies on one actively maintained, open-source PHP parsing library declared in `composer.json`:
 
-1. **Smalot PDF Parser** (`smalot/pdfparser`): Text extraction and page counting for PDF files.
-2. **PHPOffice / PHPWord** (`phpoffice/phpword`): Text extraction from `.doc` and `.docx` files.
-3. **PHPOffice / PhpSpreadsheet** (`phpoffice/phpspreadsheet`): Text extraction from `.xls` and `.xlsx` spreadsheets.
-4. **PHPOffice / PHPPresentation** (`phpoffice/phppresentation`): **Not implemented.** Intended for `.ppt` and `.pptx`. The library is not a dependency yet.
+1. **Smalot PDF Parser** (`smalot/pdfparser`): Text extraction from PDF files. It is not used for page counting (see section 8).
+
+Office files need no parsing library, which keeps memory use low:
+
+* **`.docx`, `.pptx` and `.xlsx`**: These are ZIP archives of XML. The text parts are streamed with PHP's `ZipArchive` and `XMLReader`.
+* **`.doc`, `.ppt` and `.xls`**: These are read directly, as described in section 3.3.
+
+PHPWord, PHPPresentation and PhpSpreadsheet are deliberately not used:
+
+* PHPWord's `MsDoc` reader decodes 8-bit text as UTF-16, so keywords in those `.doc` files would never match.
+* PHPPresentation would add two packages for a pre-1.0 reader.
+* PhpSpreadsheet loads the whole workbook into memory, measured at 711 MB and 35 seconds for a 12.8 MB `.xlsx`, against 32 MB and 1.3 seconds when streamed. A PHP memory error can't be caught, so this could fail a Media save and break the non-blocking policy.
+
+### 3.3 Legacy Binary Formats (`.doc`, `.ppt`, `.xls`)
+
+These files are not parsed. They are read in 1 MB chunks, and runs of readable characters are kept, both as 8-bit text and as UTF-16. This is enough for keyword matching, with these limits:
+
+* The file's metadata and other embedded strings are scanned along with its text.
+* An 8-bit run needs at least 5 ASCII characters, and a UTF-16 run at least 4 Latin characters. Text that is shorter, or that uses other alphabets, is not matched unless it sits inside a longer run.
+* Accented characters are kept only when they fall between ASCII characters.
 
 ## 4. Configuration & Administration UI
 
@@ -63,8 +80,11 @@ To avoid abandoned software, the module relies on actively maintained, open-sour
 To preserve execution time and minimize server load:
 
 1. **Hashing Algorithm**: SHA-256 hash computed on the binary content of the file.
-2. **Cache Key Structure**: `file_keyword_validator:{sha256_hash}:{keyword_list_hash}`, where the keyword list hash is a CRC32b of the current keyword list.
-3. **Storage**: The `cache.default` bin, with a permanent lifetime. Rebuilding Drupal's caches clears the results, and the next scan parses the file again.
+   * Each file is hashed once per request.
+2. **Cache Key Structure**:
+   * Keyword results: `file_keyword_validator:{sha256_hash}:{keyword_list_hash}`, where the keyword list hash is a CRC32b of the current keyword list.
+   * PDF page count: `file_keyword_validator:pages:{sha256_hash}`. An unknown count is cached too.
+3. **Storage**: The `cache.default` bin, with a permanent lifetime. Rebuilding Drupal's caches clears the results, and the next scan reads the file again.
 4. **Execution Logic**:
    * Before parsing, look up the cache key.
    * On a hit, bypass parsing and reuse the cached result. This is what makes a re-scan on a moderation transition cheap.
@@ -81,6 +101,7 @@ To preserve execution time and minimize server load:
   * **Existing Media**: only files added since the previous revision.
   * **Moderation state change**: every scannable file on the Media item, checked again.
 * **Change Detection**: A save is compared with **the revision it started from** (`getLoadedRevisionId()`), never with `$media->getOriginal()`. `getOriginal()` returns the default revision, so with a pending draft it would report a state or file change on every save. For large files, that causes an endless loop of queue items and revisions.
+* **One Decision per Save**: `hook_media_presave()` is the only place that decides what to scan and how. `hook_media_insert()` and `hook_media_update()` only queue what presave deferred, because the revision ID doesn't exist until then. No file is read, hashed or evaluated a second time for the same save.
 * **Deletion Protection**: File deletion hooks (`hook_file_delete()`, `hook_entity_delete()`) are explicitly **excluded**.
 
 ### 6.2 Synchronous vs. Asynchronous Evaluation
@@ -90,8 +111,9 @@ When a scan is triggered, each file is evaluated by size and, for PDFs, page cou
 1. **Synchronous Mode** (File $\le$ 10MB AND $\le$ 500 pages):
    * Execute text parsing during `hook_media_presave()`.
    * Write the audit entry into the revision being saved.
-2. **Asynchronous Mode** (File $>$ 10MB OR $>$ 500 pages):
-   * After the save, enqueue a job via Drupal Queue API (`file_keyword_validator_queue`).
+2. **Asynchronous Mode** (File $>$ 10MB OR $>$ 500 pages OR PDF page count unknown):
+   * Size is checked first, so a file over the size threshold never has its pages counted.
+   * Presave defers the file, and the insert or update hook enqueues a job via Drupal Queue API (`file_keyword_validator_queue`).
    * **Queue Item**: `{file_id, revision_id, state}`, where `revision_id` is the revision that triggered the scan and `state` is the moderation state description. The state is captured when queueing because the transition cannot be worked out from the revision once it has been saved.
    * A Queue Worker processes the file in the background via Cron (up to 60 seconds per run) or the Drush queue runner.
    * Until the queue runs, the revision has no audit entry for that file.
@@ -128,24 +150,19 @@ Under no circumstances will the validator block a file save, throw a form except
 
 ## 8. Performance & Resource Optimization Strategies
 
-* **PHP 8.3 Performance Adjustments**: Leverage explicit type declarations and memory optimizations available in PHP 8.3+.
+* **PHP 8.4 Performance Adjustments**: Leverage explicit type declarations and memory optimizations available in PHP 8.4+.
 * **Result Caching**: Implemented as described in section 5.
-* **Streaming Reader Interfaces**: Use XML / ZipArchive streaming techniques for MS Office formats rather than loading entire documents into memory. **Not implemented.** Office files are loaded whole by PHPWord and PhpSpreadsheet.
-* **PDF Page Chunking**: Analyze PDF documents page-by-page and exit gracefully if memory consumption approaches standard limits. **Not implemented.** PDFs are parsed whole, including for the page count, so a PDF under the size threshold is fully parsed during the request.
+* **Streaming Reader Interfaces**: Use XML / ZipArchive streaming techniques for MS Office formats rather than loading entire documents into memory. Implemented. `.docx`, `.pptx` and `.xlsx` are streamed, and `.doc`, `.ppt` and `.xls` are read in chunks.
+* **PDF Page Count**: Deciding how to scan a file must stay inexpensive, so the count is read from the file without a parser, in 1 MB chunks. It comes from the linearization header at the start of the file when there is one, and otherwise from the page tree root's `/Count`. If neither is readable, as with a page tree inside a compressed object stream, the count is unknown and the PDF is queued rather than parsed during the request. The result is cached by fingerprint, so a PDF is only read for this once.
+* **PDF Page Chunking**: Analyze PDF documents page-by-page and exit gracefully if memory consumption approaches standard limits. **Not implemented.** Text extraction parses the whole PDF.
 * **Execution Time Management**: Reserve `set_time_limit()` overrides exclusively for asynchronous queue workers to protect synchronous web execution timeouts. **Not implemented.** No overrides are set.
 
 ## 9. Not Implemented & Known Gaps
 
 | Area | Requirement | Current behavior |
 |---|---|---|
-| 3.1 | `.pptx` and `.ppt` extraction | `.pptx` is enabled but always gives no matches. `.ppt` is not enabled. |
-| 3.1 | Full `.docx` text | Tables, headers and footers are not read. |
-| 3.1 | Legacy `.doc` extraction | Usually fails to load, which is logged and treated as no matches. |
 | 4.1 | Regular expression keywords | Plain case-insensitive substring matching only. |
 | 4.1 | Memory limit cap | No setting exists. |
 | 6.2 | `FileKeywordScanEvent` | No event class exists. The worker writes the log directly. |
-| 8 | Streaming Office readers | Files are loaded whole. |
 | 8 | PDF page chunking and memory exit | PDFs are parsed whole. |
 | 8 | `set_time_limit()` in queue workers | Not set. |
-| 2 | PHP `^8.3` | `file_keyword_validator.info.yml` declares `php: '8.4'`. |
-| 3.2 | Library versions | The module's `composer.json` requires `phpoffice/phpspreadsheet` `^2.0`, while the project requires and installs `^5.10`. |

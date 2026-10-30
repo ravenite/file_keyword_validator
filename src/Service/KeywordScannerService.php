@@ -16,21 +16,35 @@ use Drupal\content_moderation\ModerationInformationInterface;
  */
 class KeywordScannerService {
 
+  /**
+   * SHA-256 fingerprints already calculated in this request, keyed by file ID.
+   *
+   * @var string[]
+   */
+  protected array $fingerprints = [];
+
+  /**
+   * Scans waiting for the revision ID, keyed by the media being saved.
+   */
+  protected \WeakMap $deferredScans;
+
   public function __construct(
     protected ConfigFactoryInterface $configFactory,
     protected TextExtractorService $extractor,
     protected CacheBackendInterface $cache,
     protected EntityTypeManagerInterface $entityTypeManager,
     protected ModerationInformationInterface $moderationInformation,
-    protected Connection $database
-  ) {}
+    protected Connection $database,
+  ) {
+    $this->deferredScans = new \WeakMap();
+  }
 
   /**
    * Whether the file has an extension enabled for scanning.
    */
   public function isScannable(FileInterface $file): bool {
     $config = $this->configFactory->get('file_keyword_validator.settings');
-    $allowed_extensions = $config->get('enabled_extensions') ?? ['pdf', 'docx', 'doc', 'xlsx', 'xls', 'pptx'];
+    $allowed_extensions = $config->get('enabled_extensions') ?? ['pdf', 'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt'];
     $extension = strtolower(pathinfo($file->getFilename(), PATHINFO_EXTENSION));
 
     return in_array($extension, $allowed_extensions, TRUE);
@@ -48,10 +62,58 @@ class KeywordScannerService {
 
     $extension = strtolower(pathinfo($file->getFilename(), PATHINFO_EXTENSION));
     if ($extension === 'pdf') {
-      return $this->extractor->getPdfPageCount($file) > (int) $config->get('async_threshold_pages');
+      // An unknown page count goes to the queue, so a PDF is never parsed in
+      // the request just to size it.
+      $pages = $this->getPageCount($file);
+      return $pages === NULL || $pages > (int) $config->get('async_threshold_pages');
     }
 
     return FALSE;
+  }
+
+  /**
+   * Returns a PDF's page count, reading the file once per fingerprint.
+   */
+  protected function getPageCount(FileInterface $file): ?int {
+    $hash = $this->getFileFingerprint($file);
+    if ($hash === '') {
+      return NULL;
+    }
+
+    $cid = 'file_keyword_validator:pages:' . $hash;
+    if ($cache = $this->cache->get($cid)) {
+      return $cache->data;
+    }
+
+    $pages = $this->extractor->getPdfPageCount($file);
+    $this->cache->set($cid, $pages, CacheBackendInterface::CACHE_PERMANENT);
+
+    return $pages;
+  }
+
+  /**
+   * Holds scans for a media save until its revision ID is known.
+   *
+   * @param \Drupal\media\MediaInterface $media
+   *   The media being saved.
+   * @param array[] $scans
+   *   Queue item data, with file_id and state.
+   */
+  public function deferScans(MediaInterface $media, array $scans): void {
+    $this->deferredScans[$media] = $scans;
+  }
+
+  /**
+   * Returns and clears the scans deferred for a media save.
+   *
+   * @return array[]
+   *   Queue item data, with file_id and state.
+   */
+  public function takeDeferredScans(MediaInterface $media): array {
+    $scans = $this->deferredScans[$media] ?? [];
+    unset($this->deferredScans[$media]);
+
+    return $scans;
   }
 
   /**
@@ -86,7 +148,7 @@ class KeywordScannerService {
       }
     }
 
-    // Cache permanently until clear/re-file hash change
+    // Cache permanently until clear/re-file hash change.
     $this->cache->set($cid, $matched_keywords, CacheBackendInterface::CACHE_PERMANENT);
 
     return $matched_keywords;
@@ -121,16 +183,16 @@ class KeywordScannerService {
   /**
    * Describes the media's moderation transition/state, or published status.
    */
-  public function describeState(MediaInterface $media): string {
+  public function describeState(MediaInterface $media, ?MediaInterface $previous): string {
     if (!$this->moderationInformation->isModeratedEntity($media)) {
       return 'status: ' . ($media->isPublished() ? 'published' : 'unpublished');
     }
 
     $state = $media->get('moderation_state')->value;
-    $previous = $this->getPreviousRevision($media)?->get('moderation_state')->value;
+    $previous_state = $previous?->get('moderation_state')->value;
 
-    if ($previous && $previous !== $state) {
-      return sprintf('transition: %s → %s', $previous, $state);
+    if ($previous_state && $previous_state !== $state) {
+      return sprintf('transition: %s → %s', $previous_state, $state);
     }
     return 'state: ' . $state;
   }
@@ -203,11 +265,15 @@ class KeywordScannerService {
    * Calculate SHA-256 fingerprint for caching content scans.
    */
   public function getFileFingerprint(FileInterface $file): string {
+    if (isset($this->fingerprints[$file->id()])) {
+      return $this->fingerprints[$file->id()];
+    }
+
     $real_path = \Drupal::service('file_system')->realpath($file->getFileUri());
     if (!$real_path || !file_exists($real_path)) {
       return '';
     }
-    return hash_file('sha256', $real_path) ?: '';
+    return $this->fingerprints[$file->id()] = hash_file('sha256', $real_path) ?: '';
   }
 
 }

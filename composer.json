@@ -4,10 +4,8 @@
   "description": "Scans uploaded PDF and MS Office documents for flagged keywords.",
   "license": "GPL-2.0-or-later",
   "require": {
-    "php": ">=8.3",
+    "php": ">=8.4",
     "drupal/core": "^11",
-    "smalot/pdfparser": "^2.7",
-    "phpoffice/phpspreadsheet": "^2.0",
-    "phpoffice/phpword": "^1.2"
+    "smalot/pdfparser": "^2.7"
   }
 }

@@ -11,11 +11,10 @@ carries on.
 
 ## Requirements
 
+- PHP 8.4 or later.
 - Drupal 11 with `file`, `media`, `workflows` and `content_moderation`.
-- PHP libraries (already in the project's root `composer.json`):
-  - `smalot/pdfparser` for PDF
-  - `phpoffice/phpword` for Word
-  - `phpoffice/phpspreadsheet` for Excel
+- `smalot/pdfparser` for PDF (already in the project's root `composer.json`).
+- PHP's `zip` and `xmlreader` extensions for Office files.
 
 ## Configuration
 
@@ -28,7 +27,7 @@ carries on.
 | Flagged keywords | restricted, confidential, non-public | One per line. Matching is case-insensitive substring matching. |
 | Max file size for sync scanning | 10 MB | Larger files are scanned in the background. |
 | Max page count for sync scanning | 500 | PDFs with more pages are scanned in the background. |
-| `enabled_extensions` (config only) | pdf, docx, doc, xlsx, xls, pptx | Files with other extensions are ignored. |
+| `enabled_extensions` (config only) | pdf, docx, doc, xlsx, xls, pptx, ppt | Files with other extensions are ignored. |
 
 ## How it works
 
@@ -38,10 +37,10 @@ Media save
   ├─ hook_media_presave()
   │     for each new/changed scannable file:
   │       small file  → scan now, write audit into THIS revision's log   (sync)
-  │       large file  → skip (handled after save)
+  │       large file  → defer until the revision ID exists
   │
   └─ hook_media_insert() / hook_media_update()
-        large file    → add {file_id, revision_id, state} to
+        deferred file → add {file_id, revision_id, state} to
                         file_keyword_validator_queue
 
 Queue run (cron or drush)
@@ -71,8 +70,10 @@ never saved as Media is not scanned.
 - **Sync**: the file is at or under both limits. It is scanned during the
   request, and the audit entry is added to the revision being saved, after any
   log message the editor wrote.
-- **Async**: the file is over the size limit or (for PDFs) the page limit.
-  It is queued after the Media item is saved, and the worker later adds the
+- **Async**: the file is over the size limit or (for PDFs) the page limit, or
+  it is a PDF whose page count can't be read from the file. The count is read
+  directly rather than by parsing the PDF, which keeps this check cheap, but
+  PDFs with compressed object streams may not expose it. It is queued after the Media item is saved, and the worker later adds the
   audit entry to that same revision, after any log message the editor wrote.
   Until the queue runs, the revision has no audit entry for that file.
 
@@ -82,6 +83,10 @@ Results are cached in `cache.default` by the file's SHA-256 hash plus the
 current keyword list. Scanning the same file content again (for example on a
 moderation transition) reuses the earlier result. Editing the keyword list
 means files are scanned again with the new list.
+
+PDF page counts are cached by the hash alone, and each file is hashed once per
+request. The decision about what to scan is made once, in presave, so a save
+never reads or evaluates the same file twice.
 
 ## The audit log message
 
@@ -136,13 +141,19 @@ Drop the `ddev` prefix when running Drush directly on the server.
 
 ## Supported formats & known limitations
 
+Extraction is **best effort**. It reads the text stored in a file and nothing
+else. There is **no OCR**, so text inside images is never read, and
+**password-protected files are not supported**. No audit entry means no flagged
+keyword was found in the text that could be read, not that the file is free of
+those keywords.
+
 | Extension | Extracted with | Notes |
 |---|---|---|
-| pdf | smalot/pdfparser | Scanned or image-only PDFs have no text, so nothing is matched. |
-| docx | PhpWord | Only text elements directly inside sections. Text in tables, headers and footers is not read. |
-| doc | PhpWord | Legacy `.doc` usually fails to load, which is logged and treated as "no matches". |
-| xlsx, xls | PhpSpreadsheet | Every cell's formatted value. |
-| pptx | — | Enabled in config but no extractor exists, so it is always "no matches". |
+| pdf | smalot/pdfparser | Scanned or image-only PDFs have no text to read, so nothing is matched. |
+| docx | ZipArchive, XMLReader | Body, tables, text boxes, headers, footers, footnotes, endnotes and comments. |
+| pptx | ZipArchive, XMLReader | Slides, including tables, and speaker notes. |
+| xlsx | ZipArchive, XMLReader | Text, stored cell values including formula results, and comments. Values are read as stored, so dates and numbers are not formatted. |
+| doc, ppt, xls | Direct read | Best effort. Keeps readable runs of text instead of parsing the format, so metadata is included. Very short text and non-Latin alphabets may not match. |
 
 ## Files
 
