@@ -1,0 +1,7 @@
+file_keyword_validator.admin_settings:
+  path: '/admin/config/media/file-keyword-validator'
+  defaults:
+    _form: '\Drupal\file_keyword_validator\Form\AdminSettingsForm'
+    _title: 'File Keyword Validator Settings'
+  requirements:
+    _permission: 'administer file keyword validator'

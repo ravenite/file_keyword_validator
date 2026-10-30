@@ -1,0 +1,149 @@
+<?php
+
+/**
+ * @file
+ * Core hooks for file_keyword_validator module.
+ */
+
+use Drupal\file\FileInterface;
+use Drupal\media\MediaInterface;
+
+/**
+ * Implements hook_ENTITY_TYPE_presave() for media entities.
+ *
+ * Scans small files inline and writes matches into the revision being saved.
+ * Large files are deferred to the queue in hook_media_insert/update().
+ */
+function file_keyword_validator_media_presave(MediaInterface $media): void {
+  /** @var \Drupal\file_keyword_validator\Service\KeywordScannerService $scanner */
+  $scanner = \Drupal::service('file_keyword_validator.scanner');
+  $entries = [];
+
+  foreach (_file_keyword_validator_files_to_scan($media) as $file) {
+    try {
+      if ($scanner->requiresAsync($file)) {
+        continue;
+      }
+      $matches = $scanner->scanFile($file);
+      if ($matches) {
+        $entries[] = $scanner->formatLogEntry($file->getFilename(), $matches, $scanner->describeState($media), 'sync');
+      }
+    }
+    catch (\Throwable $e) {
+      // Scanning must never block a save.
+      \Drupal::logger('file_keyword_validator')->error('Scan of @file failed: @msg', [
+        '@file' => $file->getFilename(),
+        '@msg' => $e->getMessage(),
+      ]);
+    }
+  }
+
+  if (!$entries) {
+    return;
+  }
+
+  $media->setNewRevision(TRUE);
+  $scanner->markRevisionAffected($media);
+  $existing = trim((string) $media->getRevisionLogMessage());
+  // An unchanged log carried over from the loaded revision is not a new
+  // message from the editor, so don't repeat it.
+  $previous = $scanner->getPreviousRevision($media);
+  if ($previous && $existing === trim((string) $previous->getRevisionLogMessage())) {
+    $existing = '';
+  }
+  $media->setRevisionLogMessage(implode("\n", array_filter([$existing, ...$entries])));
+}
+
+/**
+ * Implements hook_ENTITY_TYPE_insert() for media entities.
+ */
+function file_keyword_validator_media_insert(MediaInterface $media): void {
+  _file_keyword_validator_queue_large_files($media);
+}
+
+/**
+ * Implements hook_ENTITY_TYPE_update() for media entities.
+ */
+function file_keyword_validator_media_update(MediaInterface $media): void {
+  _file_keyword_validator_queue_large_files($media);
+}
+
+/**
+ * Queues large files for background scanning once the media has an ID.
+ */
+function _file_keyword_validator_queue_large_files(MediaInterface $media): void {
+  /** @var \Drupal\file_keyword_validator\Service\KeywordScannerService $scanner */
+  $scanner = \Drupal::service('file_keyword_validator.scanner');
+  $queue = \Drupal::queue('file_keyword_validator_queue');
+
+  foreach (_file_keyword_validator_files_to_scan($media) as $file) {
+    try {
+      if ($scanner->requiresAsync($file)) {
+        // The state is captured here because the transition can't be worked
+        // out from the revision once it has been saved.
+        $queue->createItem([
+          'file_id' => $file->id(),
+          'revision_id' => (int) $media->getRevisionId(),
+          'state' => $scanner->describeState($media),
+        ]);
+      }
+    }
+    catch (\Throwable $e) {
+      \Drupal::logger('file_keyword_validator')->error('Queueing @file failed: @msg', [
+        '@file' => $file->getFilename(),
+        '@msg' => $e->getMessage(),
+      ]);
+    }
+  }
+}
+
+/**
+ * Returns the scannable files on a media item that need (re)scanning.
+ *
+ * All files are returned for new media and on a moderation state change;
+ * otherwise only files that were added since the previous revision. This also
+ * keeps the queue worker's own revision save from triggering another scan.
+ *
+ * @return \Drupal\file\FileInterface[]
+ *   Files keyed by file ID.
+ */
+function _file_keyword_validator_files_to_scan(MediaInterface $media): array {
+  /** @var \Drupal\file_keyword_validator\Service\KeywordScannerService $scanner */
+  $scanner = \Drupal::service('file_keyword_validator.scanner');
+  $previous = $scanner->getPreviousRevision($media);
+  $current_ids = _file_keyword_validator_file_ids($media);
+
+  if ($previous) {
+    $state_changed = \Drupal::service('content_moderation.moderation_information')->isModeratedEntity($media)
+      && $media->get('moderation_state')->value !== $previous->get('moderation_state')->value;
+    if (!$state_changed) {
+      $current_ids = array_diff($current_ids, _file_keyword_validator_file_ids($previous));
+    }
+  }
+
+  if (!$current_ids) {
+    return [];
+  }
+
+  $files =\Drupal::entityTypeManager()->getStorage('file')->loadMultiple($current_ids);
+
+  return array_filter($files, fn (FileInterface $file) => $scanner->isScannable($file));
+}
+
+/**
+ * Collects referenced file IDs from all file fields on a media item.
+ */
+function _file_keyword_validator_file_ids(MediaInterface $media): array {
+  $ids = [];
+  foreach ($media->getFieldDefinitions() as $field_name => $definition) {
+    if ($definition->getType() !== 'file') {
+      continue;
+    }
+    foreach ($media->get($field_name) as $item) {
+      if ($item->target_id) {
+        $ids[] = (int) $item->target_id;
+      }
+    }
+  }
+  return array_values(array_unique($ids));
+}

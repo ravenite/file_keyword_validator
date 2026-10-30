@@ -1,0 +1,11 @@
+name: 'File Keyword Validator'
+type: module
+description: 'Scans uploaded PDF and MS Office documents for flagged keywords without blocking uploads.'
+package: 'Custom'
+core_version_requirement: '^11'
+php: '8.4'
+dependencies:
+  - drupal:file
+  - drupal:media
+  - drupal:workflows
+  - drupal:content_moderation

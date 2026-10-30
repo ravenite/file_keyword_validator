@@ -1,0 +1,4 @@
+administer file keyword validator:
+  title: 'Administer File Keyword Validator'
+  description: 'Manage flagged keywords and file scanner settings.'
+  restrict access: true

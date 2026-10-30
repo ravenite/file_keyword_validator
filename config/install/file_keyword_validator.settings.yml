@@ -1,0 +1,13 @@
+flagged_keywords:
+  - restricted
+  - confidential
+  - non-public
+async_threshold_size: 10485760
+async_threshold_pages: 500
+enabled_extensions:
+  - pdf
+  - docx
+  - doc
+  - xlsx
+  - xls
+  - pptx
